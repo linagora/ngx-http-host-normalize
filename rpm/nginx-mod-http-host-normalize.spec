@@ -66,19 +66,6 @@ EOF
 %{_libdir}/nginx/modules/ngx_http_host_normalize_module.so
 %{_datadir}/nginx/modules/mod-http-host-normalize.conf
 
-%post
-# Enable module if not already enabled
-if [ ! -f /etc/nginx/conf.d/mod-http-host-normalize.conf ]; then
-    ln -sf %{_datadir}/nginx/modules/mod-http-host-normalize.conf \
-        /etc/nginx/conf.d/mod-http-host-normalize.conf 2>/dev/null || true
-fi
-
-%preun
-if [ "$1" = "0" ]; then
-    # Remove module config on uninstall
-    rm -f /etc/nginx/conf.d/mod-http-host-normalize.conf 2>/dev/null || true
-fi
-
 %changelog
 * Thu Mar 13 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.0-1
 - Initial RPM package

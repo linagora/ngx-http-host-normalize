@@ -180,17 +180,6 @@ jobs:
           %{_libdir}/nginx/modules/ngx_http_host_normalize_module.so
           %{_datadir}/nginx/modules/mod-http-host-normalize.conf
 
-          %post
-          if [ ! -f /etc/nginx/conf.d/mod-http-host-normalize.conf ]; then
-              ln -sf %{_datadir}/nginx/modules/mod-http-host-normalize.conf \
-                  /etc/nginx/conf.d/mod-http-host-normalize.conf 2>/dev/null || true
-          fi
-
-          %preun
-          if [ "$1" = "0" ]; then
-              rm -f /etc/nginx/conf.d/mod-http-host-normalize.conf 2>/dev/null || true
-          fi
-
           %changelog
           * Thu Mar 13 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.0-1
           - Initial RPM package
@@ -414,9 +403,10 @@ jobs:
             <pre>sudo dnf install nginx-mod-http-host-normalize</pre>
 
             <h3>4. Enable the module</h3>
-            <p>The module is automatically enabled on install. If you need to enable it manually:</p>
-            <pre>sudo ln -sf /usr/share/nginx/modules/mod-http-host-normalize.conf /etc/nginx/conf.d/mod-http-host-normalize.conf
-          sudo nginx -t && sudo systemctl reload nginx</pre>
+            <p>Add this line at the <strong>top</strong> of <code>/etc/nginx/nginx.conf</code> (before any blocks):</p>
+            <pre>load_module /usr/lib64/nginx/modules/ngx_http_host_normalize_module.so;</pre>
+            <p>Then reload nginx:</p>
+            <pre>sudo nginx -t && sudo systemctl reload nginx</pre>
 
             <h2>Links</h2>
             <ul>

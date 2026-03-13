@@ -37,7 +37,60 @@ states:
 
 ## Installation
 
-### Building as a Dynamic Module
+### Pre-built Packages (Recommended)
+
+Pre-built packages are available for Debian, Ubuntu, Rocky Linux, RHEL, and AlmaLinux.
+
+**Repository:** https://linagora.github.io/ngx-http-host-normalize/
+
+#### Debian / Ubuntu
+
+```bash
+# Add GPG key
+curl -fsSL https://linagora.github.io/ngx-http-host-normalize/KEY.gpg | \
+  sudo gpg --dearmor -o /etc/apt/keyrings/ngx-http-host-normalize.gpg
+
+# Add repository (replace CODENAME with: bookworm, trixie, or sid)
+echo "deb [signed-by=/etc/apt/keyrings/ngx-http-host-normalize.gpg] \
+  https://linagora.github.io/ngx-http-host-normalize CODENAME main" | \
+  sudo tee /etc/apt/sources.list.d/ngx-http-host-normalize.list
+
+# Install
+sudo apt update
+sudo apt install libnginx-mod-http-host-normalize
+```
+
+The module is **automatically enabled** on Debian/Ubuntu.
+
+#### Rocky Linux / RHEL / AlmaLinux
+
+```bash
+# Import GPG key
+sudo rpm --import https://linagora.github.io/ngx-http-host-normalize/KEY.gpg
+
+# Add repository
+sudo tee /etc/yum.repos.d/ngx-http-host-normalize.repo << 'EOF'
+[ngx-http-host-normalize]
+name=Nginx Host Normalize Module
+baseurl=https://linagora.github.io/ngx-http-host-normalize/rpm/el$releasever/x86_64/
+enabled=1
+gpgcheck=1
+gpgkey=https://linagora.github.io/ngx-http-host-normalize/KEY.gpg
+EOF
+
+# Install
+sudo dnf install nginx-mod-http-host-normalize
+```
+
+Then enable the module by adding this line at the **top** of `/etc/nginx/nginx.conf`:
+
+```nginx
+load_module /usr/lib64/nginx/modules/ngx_http_host_normalize_module.so;
+```
+
+### Building from Source
+
+#### As a Dynamic Module
 
 ```bash
 # Download nginx source (match your installed version)
@@ -56,7 +109,13 @@ make modules
 sudo cp objs/ngx_http_host_normalize_module.so /usr/lib/nginx/modules/
 ```
 
-### Building Statically
+Then add to your `nginx.conf`:
+
+```nginx
+load_module modules/ngx_http_host_normalize_module.so;
+```
+
+#### Statically Linked
 
 ```bash
 cd nginx-X.Y.Z
@@ -65,19 +124,12 @@ make
 sudo make install
 ```
 
+No configuration needed - the module is automatically active.
+
 ## Configuration
 
-### Dynamic Module
-
-Add to your `nginx.conf`:
-
-```nginx
-load_module modules/ngx_http_host_normalize_module.so;
-```
-
-### Static Module
-
-No configuration needed - the module is automatically active.
+Once loaded, no additional configuration is required. The module automatically
+normalizes the Host header for all requests with absolute URIs.
 
 ## How It Works
 
