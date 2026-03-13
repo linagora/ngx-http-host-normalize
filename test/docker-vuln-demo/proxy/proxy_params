@@ -1,4 +1,5 @@
-# Standard proxy_params - uses $http_host which is VULNERABLE
+# Debian/Ubuntu proxy_params - uses $http_host which is VULNERABLE
+# This file is identical to /etc/nginx/proxy_params on Debian/Ubuntu
 proxy_set_header Host $http_host;
 proxy_set_header X-Real-IP $remote_addr;
 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

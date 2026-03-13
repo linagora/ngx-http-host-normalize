@@ -27,6 +27,12 @@ Host: protected.local
 The proxy routes to `public.local` (from request line) but passes
 `Host: protected.local` to the backend, which serves the protected content.
 
+**Note:** This test uses Debian/Ubuntu's `/etc/nginx/proxy_params` which contains:
+```nginx
+proxy_set_header Host $http_host;
+```
+The upstream nginx Docker image does not include this file.
+
 ## Usage
 
 ```bash
