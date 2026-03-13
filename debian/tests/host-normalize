@@ -66,11 +66,27 @@ http {
 }
 EOF
 
+# Start FastCGI server
 perl $TMPDIR/fcgi-echo.pl $TMPDIR/fcgi.sock &
 FCGI_PID=$!
-sleep 0.2
+sleep 0.5
+
+# Test nginx config first
+echo "Testing nginx configuration..."
+/usr/sbin/nginx -t -c $TMPDIR/nginx.conf 2>&1 || { echo "Nginx config test failed"; exit 1; }
+
+# Start nginx
+echo "Starting nginx..."
 /usr/sbin/nginx -c $TMPDIR/nginx.conf &
-sleep 0.3
+sleep 0.5
+
+# Verify nginx is running
+if ! pgrep -f "nginx.*$TMPDIR" > /dev/null; then
+    echo "ERROR: nginx failed to start"
+    cat $TMPDIR/nginx.conf
+    exit 1
+fi
+echo "Nginx started successfully"
 
 echo "=== Test: Host Header Normalization with Absolute URI ==="
 echo ""
@@ -79,8 +95,14 @@ echo "  curl --request-target 'http://secure.example.com/'"
 echo "       -H 'Host: malicious.attacker.com' http://127.0.0.1:$PORT/"
 echo ""
 
-RESULT=$(curl -s --request-target 'http://secure.example.com/' \
-    -H 'Host: malicious.attacker.com' http://127.0.0.1:$PORT/)
+RESULT=$(curl -s --max-time 5 --request-target 'http://secure.example.com/' \
+    -H 'Host: malicious.attacker.com' http://127.0.0.1:$PORT/ 2>&1)
+CURL_RC=$?
+if [ $CURL_RC -ne 0 ]; then
+    echo "ERROR: curl failed with exit code $CURL_RC"
+    echo "Result: $RESULT"
+    exit 1
+fi
 
 HTTP_HOST=$(echo "$RESULT" | grep -oP 'HTTP_HOST=\K.*')
 HOST=$(echo "$RESULT" | grep -oP 'HOST=\K.*')
