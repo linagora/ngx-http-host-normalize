@@ -210,7 +210,10 @@ This passes the correct host even with absolute URI attacks.
 
 ### Reverse Proxy (proxy_pass)
 
-The default `/etc/nginx/proxy_params` uses `$http_host`, which is **vulnerable**.
+By default (without `proxy_set_header Host`), nginx sends the upstream server name
+as the Host header, which is safe but breaks virtual hosting on the backend.
+
+Debian/Ubuntu's `/etc/nginx/proxy_params` uses `$http_host`, which is **vulnerable**.
 
 **Fix: Use $host instead of $http_host**
 

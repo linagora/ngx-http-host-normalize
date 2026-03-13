@@ -31,7 +31,10 @@ The proxy routes to `public.local` (from request line) but passes
 ```nginx
 proxy_set_header Host $http_host;
 ```
-The upstream nginx Docker image does not include this file.
+
+**Important:** Without `proxy_set_header Host`, nginx sends the upstream server name
+as the Host header (not `$http_host`), which is safe but breaks virtual hosting.
+The vulnerability only exists when explicitly using `proxy_set_header Host $http_host;`.
 
 ## Usage
 
