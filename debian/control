@@ -1,7 +1,7 @@
 Source: libnginx-mod-http-host-normalize
 Section: httpd
 Priority: optional
-Maintainer: LINAGORA <https://github.com/linagora/ngx-http-host-normalize/>
+Maintainer: LINAGORA <info@linagora.com>
 Build-Depends: debhelper-compat (= 13),
                nginx-dev (>= 1.22.0)
 Standards-Version: 4.6.2
