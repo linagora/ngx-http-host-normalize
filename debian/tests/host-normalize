@@ -73,7 +73,7 @@ perl -MFCGI -e 'print "FCGI module version: $FCGI::VERSION\n"' 2>&1 || { echo "F
 
 # Start FastCGI server on TCP port
 echo "Starting FastCGI server on port $FCGI_PORT..."
-perl $TMPDIR/fcgi-echo.pl :$FCGI_PORT 2>$TMPDIR/fcgi.err &
+perl $TMPDIR/fcgi-echo.pl 127.0.0.1:$FCGI_PORT 2>$TMPDIR/fcgi.err &
 FCGI_PID=$!
 
 # Wait for FastCGI to start listening (retry up to 5 seconds)
