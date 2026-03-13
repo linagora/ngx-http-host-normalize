@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build & Test (${{ matrix.codename }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.container }}
+
+    strategy:
+      matrix:
+        include:
+          - codename: bookworm
+            container: debian:bookworm
+          - codename: trixie
+            container: debian:trixie
+          - codename: sid
+            container: debian:sid
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential \
+            debhelper \
+            nginx-dev \
+            devscripts \
+            fakeroot
+
+      - name: Build Debian package
+        run: |
+          dpkg-buildpackage -us -uc -b
+
+      - name: Install test dependencies
+        run: |
+          apt-get install -y \
+            nginx \
+            libfcgi-perl \
+            curl \
+            procps
+
+      - name: Install built package
+        run: |
+          dpkg -i ../libnginx-mod-http-host-normalize_*.deb
+
+      - name: Run host normalization test
+        run: |
+          chmod +x debian/tests/host-normalize
+          debian/tests/host-normalize
