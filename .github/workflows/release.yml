@@ -91,16 +91,18 @@ jobs:
           # On EL8, enable powertools; on EL9+, enable crb
           dnf config-manager --set-enabled powertools 2>/dev/null || \
             dnf config-manager --set-enabled crb 2>/dev/null || true
+          # pcre-devel doesn't exist on EL10, only pcre2-devel
           dnf install -y \
             rpm-build \
             gcc \
             make \
-            pcre-devel \
             pcre2-devel \
             zlib-devel \
             openssl-devel \
             curl \
             nginx
+          # Install pcre-devel only if available (EL8/EL9)
+          dnf install -y pcre-devel 2>/dev/null || true
 
       - name: Get nginx version
         id: nginx
