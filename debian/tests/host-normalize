@@ -67,9 +67,19 @@ http {
 EOF
 
 # Start FastCGI server
+echo "Starting FastCGI server..."
 perl $TMPDIR/fcgi-echo.pl $TMPDIR/fcgi.sock &
 FCGI_PID=$!
-sleep 0.5
+sleep 1
+
+# Verify FastCGI socket exists
+if [ ! -S "$TMPDIR/fcgi.sock" ]; then
+    echo "ERROR: FastCGI socket not created at $TMPDIR/fcgi.sock"
+    echo "Checking if perl FCGI is available..."
+    perl -MFCGI -e 'print "FCGI module OK\n"' 2>&1 || echo "FCGI module NOT available"
+    exit 1
+fi
+echo "FastCGI server started, socket: $TMPDIR/fcgi.sock"
 
 # Test nginx config first
 echo "Testing nginx configuration..."
@@ -122,6 +132,11 @@ if [ $CURL_RC -ne 0 ]; then
         exit 1
     fi
 fi
+
+# Debug: show raw result
+echo "Raw response:"
+echo "$RESULT"
+echo "---"
 
 # Parse results (use sed for compatibility)
 HTTP_HOST=$(echo "$RESULT" | sed -n 's/^HTTP_HOST=//p' | head -1)
