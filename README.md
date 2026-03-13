@@ -119,4 +119,4 @@ AGPL-3 License. See [LICENSE](LICENSE) file.
 
 ## Authors and copyright
 
-Written by [Xavier Guimard]<yadd@debian.org>, copyright 2026 [LINAGORA](https://linagora.com/)
+Written by [Xavier Guimard](mailto:yadd@debian.org), copyright 2026 [LINAGORA](https://linagora.com/)
