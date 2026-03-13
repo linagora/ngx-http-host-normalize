@@ -92,7 +92,8 @@ jobs:
           dnf config-manager --set-enabled powertools 2>/dev/null || \
             dnf config-manager --set-enabled crb 2>/dev/null || true
           # pcre-devel doesn't exist on EL10, only pcre2-devel
-          dnf install -y \
+          # Use --allowerasing to handle curl-minimal vs curl conflict
+          dnf install -y --allowerasing \
             rpm-build \
             gcc \
             make \
