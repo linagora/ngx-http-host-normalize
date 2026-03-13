@@ -115,8 +115,8 @@ With the module, it correctly receives `HTTP_HOST=protected.example.com`.
 
 ## License
 
-BSD 2-Clause License. See [LICENSE](LICENSE) file.
+AGPL-3 License. See [LICENSE](LICENSE) file.
 
-## Authors
+## Authors and copyright
 
-- LemonLDAP::NG Team
+Written by [Xavier Guimard]<yadd@debian.org>, copyright 2026 [LINAGORA](https://linagora.com/)
