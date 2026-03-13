@@ -59,10 +59,159 @@ jobs:
           path: packages/*.deb
           retention-days: 7
 
-  create-repo:
-    name: Create APT Repository
+  build-rpm:
+    name: Build .rpm (${{ matrix.codename }})
     runs-on: ubuntu-latest
-    needs: build-deb
+    permissions:
+      contents: read
+    container: ${{ matrix.container }}
+
+    strategy:
+      matrix:
+        include:
+          - distro: rocky
+            codename: el8
+            container: rockylinux:8
+          - distro: rocky
+            codename: el9
+            container: rockylinux:9
+          - distro: rocky
+            codename: el10
+            container: quay.io/rockylinux/rockylinux:10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          # Enable EPEL for nginx
+          dnf install -y epel-release dnf-plugins-core
+          dnf config-manager --set-enabled epel || true
+          # On EL8, enable powertools; on EL9+, enable crb
+          dnf config-manager --set-enabled powertools 2>/dev/null || \
+            dnf config-manager --set-enabled crb 2>/dev/null || true
+          dnf install -y \
+            rpm-build \
+            gcc \
+            make \
+            pcre-devel \
+            pcre2-devel \
+            zlib-devel \
+            openssl-devel \
+            curl \
+            nginx
+
+      - name: Get nginx version
+        id: nginx
+        run: |
+          NGINX_VERSION=$(nginx -v 2>&1 | sed 's/.*nginx\///')
+          echo "version=$NGINX_VERSION" >> $GITHUB_OUTPUT
+          echo "Nginx version: $NGINX_VERSION"
+
+      - name: Build nginx module
+        run: |
+          NGINX_VERSION="${{ steps.nginx.outputs.version }}"
+
+          # Download nginx source
+          curl -sL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o nginx.tar.gz
+          tar xzf nginx.tar.gz
+          cd nginx-${NGINX_VERSION}
+
+          # Configure with compat mode
+          ./configure --with-compat --add-dynamic-module=..
+
+          # Build module only
+          make modules
+
+          # Verify module was built
+          ls -la objs/*.so
+
+      - name: Create RPM structure
+        run: |
+          NGINX_VERSION="${{ steps.nginx.outputs.version }}"
+          VERSION=$(grep '^Version:' rpm/nginx-mod-http-host-normalize.spec | awk '{print $2}')
+
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+          # Copy built module
+          cp nginx-${NGINX_VERSION}/objs/ngx_http_host_normalize_module.so ~/rpmbuild/SOURCES/
+
+          # Copy spec file
+          cp rpm/nginx-mod-http-host-normalize.spec ~/rpmbuild/SPECS/
+
+          # Copy LICENSE and README
+          cp LICENSE ~/rpmbuild/SOURCES/ 2>/dev/null || echo "AGPL-3.0" > ~/rpmbuild/SOURCES/LICENSE
+          cp README.md ~/rpmbuild/SOURCES/ 2>/dev/null || echo "# ngx-http-host-normalize" > ~/rpmbuild/SOURCES/README.md
+
+      - name: Build RPM package
+        run: |
+          # Use simplified spec for pre-built module
+          cat > ~/rpmbuild/SPECS/nginx-mod-http-host-normalize.spec << 'SPECEOF'
+          Name:           nginx-mod-http-host-normalize
+          Version:        0.1.0
+          Release:        1%{?dist}
+          Summary:        Nginx module to normalize Host header for absolute URI requests
+
+          License:        AGPL-3.0-or-later
+          URL:            https://github.com/linagora/ngx-http-host-normalize
+
+          Requires:       nginx >= 1.20
+
+          %description
+          An Nginx module that normalizes the Host header when an absolute URI is used
+          in the HTTP request line, as specified in RFC 9112 Section 3.2.2.
+
+          %install
+          mkdir -p %{buildroot}%{_libdir}/nginx/modules
+          mkdir -p %{buildroot}%{_datadir}/nginx/modules
+
+          install -m 755 %{_sourcedir}/ngx_http_host_normalize_module.so \
+              %{buildroot}%{_libdir}/nginx/modules/
+
+          cat > %{buildroot}%{_datadir}/nginx/modules/mod-http-host-normalize.conf << 'EOF'
+          load_module modules/ngx_http_host_normalize_module.so;
+          EOF
+
+          %files
+          %{_libdir}/nginx/modules/ngx_http_host_normalize_module.so
+          %{_datadir}/nginx/modules/mod-http-host-normalize.conf
+
+          %post
+          if [ ! -f /etc/nginx/conf.d/mod-http-host-normalize.conf ]; then
+              ln -sf %{_datadir}/nginx/modules/mod-http-host-normalize.conf \
+                  /etc/nginx/conf.d/mod-http-host-normalize.conf 2>/dev/null || true
+          fi
+
+          %preun
+          if [ "$1" = "0" ]; then
+              rm -f /etc/nginx/conf.d/mod-http-host-normalize.conf 2>/dev/null || true
+          fi
+
+          %changelog
+          * Thu Mar 13 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.0-1
+          - Initial RPM package
+          SPECEOF
+
+          rpmbuild -bb ~/rpmbuild/SPECS/nginx-mod-http-host-normalize.spec
+
+      - name: Move packages
+        run: |
+          mkdir -p packages
+          find ~/rpmbuild/RPMS -name "*.rpm" -exec mv {} packages/ \;
+          ls -la packages/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-${{ matrix.codename }}
+          path: packages/*.rpm
+          retention-days: 7
+
+  create-repo:
+    name: Create Repositories
+    runs-on: ubuntu-latest
+    needs: [build-deb, build-rpm]
     permissions:
       contents: read
 
@@ -84,7 +233,7 @@ jobs:
       - name: Install repository tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev apt-utils
+          sudo apt-get install -y dpkg-dev apt-utils createrepo-c rpm
 
       - name: Create APT repository structure
         env:
@@ -152,6 +301,40 @@ jobs:
             cd ../../..
           done
 
+      - name: Create YUM repository structure
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          # Create repository for each EL version
+          for elver in el8 el9 el10; do
+            echo "Processing $elver..."
+
+            # Create directory structure
+            mkdir -p "repo/rpm/${elver}/x86_64"
+
+            # Copy .rpm files
+            if [ -d "artifacts/rpm-${elver}" ]; then
+              cp artifacts/rpm-${elver}/*.rpm "repo/rpm/${elver}/x86_64/"
+            fi
+
+            # Sign RPM packages
+            echo "%_gpg_name $GPG_KEY_ID" > ~/.rpmmacros
+            echo "%__gpg_sign_cmd %{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback --passphrase-fd 0 -u \"%{_gpg_name}\" -sbo %{__signature_filename} %{__plaintext_filename}" >> ~/.rpmmacros
+
+            for rpm in repo/rpm/${elver}/x86_64/*.rpm; do
+              if [ -f "$rpm" ]; then
+                echo "$GPG_PASSPHRASE" | rpm --addsign "$rpm"
+              fi
+            done
+
+            # Create repository metadata
+            createrepo_c "repo/rpm/${elver}/x86_64"
+
+            # Sign repository metadata
+            echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+              --detach-sign --armor "repo/rpm/${elver}/x86_64/repodata/repomd.xml"
+          done
+
       - name: Create index.html
         run: |
           cat > repo/index.html << 'EOF'
@@ -170,30 +353,29 @@ jobs:
           </head>
           <body>
             <h1>ngx-http-host-normalize Repository</h1>
-            <p>This repository provides Debian packages for <a href="https://github.com/LemonLDAPNG/ngx-http-host-normalize">ngx-http-host-normalize</a>,
+            <p>This repository provides packages for <a href="https://github.com/linagora/ngx-http-host-normalize">ngx-http-host-normalize</a>,
                an Nginx module that normalizes the Host header when an absolute URI is used in the request line (RFC 9112 Section 3.2.2).</p>
 
-            <h2>Supported Distributions</h2>
+            <h2>Debian / Ubuntu (APT)</h2>
+            <p>Supported distributions:</p>
             <ul>
               <li><strong>Debian 12</strong> (bookworm)</li>
               <li><strong>Debian 13</strong> (trixie)</li>
               <li><strong>Debian unstable</strong> (sid)</li>
             </ul>
 
-            <h2>Installation</h2>
-
             <h3>1. Add the GPG key</h3>
-            <pre>curl -fsSL https://lemonldapng.github.io/ngx-http-host-normalize/KEY.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/ngx-http-host-normalize.gpg</pre>
+            <pre>curl -fsSL https://linagora.github.io/ngx-http-host-normalize/KEY.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/ngx-http-host-normalize.gpg</pre>
 
             <h3>2. Add the repository</h3>
             <p>For <strong>Debian 12 (bookworm)</strong>:</p>
-            <pre>echo "deb [signed-by=/etc/apt/keyrings/ngx-http-host-normalize.gpg] https://lemonldapng.github.io/ngx-http-host-normalize bookworm main" | sudo tee /etc/apt/sources.list.d/ngx-http-host-normalize.list</pre>
+            <pre>echo "deb [signed-by=/etc/apt/keyrings/ngx-http-host-normalize.gpg] https://linagora.github.io/ngx-http-host-normalize bookworm main" | sudo tee /etc/apt/sources.list.d/ngx-http-host-normalize.list</pre>
 
             <p>For <strong>Debian 13 (trixie)</strong>:</p>
-            <pre>echo "deb [signed-by=/etc/apt/keyrings/ngx-http-host-normalize.gpg] https://lemonldapng.github.io/ngx-http-host-normalize trixie main" | sudo tee /etc/apt/sources.list.d/ngx-http-host-normalize.list</pre>
+            <pre>echo "deb [signed-by=/etc/apt/keyrings/ngx-http-host-normalize.gpg] https://linagora.github.io/ngx-http-host-normalize trixie main" | sudo tee /etc/apt/sources.list.d/ngx-http-host-normalize.list</pre>
 
             <p>For <strong>Debian unstable (sid)</strong>:</p>
-            <pre>echo "deb [signed-by=/etc/apt/keyrings/ngx-http-host-normalize.gpg] https://lemonldapng.github.io/ngx-http-host-normalize sid main" | sudo tee /etc/apt/sources.list.d/ngx-http-host-normalize.list</pre>
+            <pre>echo "deb [signed-by=/etc/apt/keyrings/ngx-http-host-normalize.gpg] https://linagora.github.io/ngx-http-host-normalize sid main" | sudo tee /etc/apt/sources.list.d/ngx-http-host-normalize.list</pre>
 
             <h3>3. Install</h3>
             <pre>sudo apt update
@@ -204,9 +386,38 @@ jobs:
             <pre>sudo ln -sf /usr/share/nginx/modules-available/mod-http-host-normalize.conf /etc/nginx/modules-enabled/50-mod-http-host-normalize.conf
           sudo nginx -t && sudo systemctl reload nginx</pre>
 
+            <h2>Rocky Linux / RHEL / AlmaLinux (DNF)</h2>
+            <p>Supported distributions:</p>
+            <ul>
+              <li><strong>Rocky Linux 8</strong> / RHEL 8 / AlmaLinux 8</li>
+              <li><strong>Rocky Linux 9</strong> / RHEL 9 / AlmaLinux 9</li>
+              <li><strong>Rocky Linux 10</strong> / RHEL 10 / AlmaLinux 10</li>
+            </ul>
+
+            <h3>1. Import the GPG key</h3>
+            <pre>sudo rpm --import https://linagora.github.io/ngx-http-host-normalize/KEY.gpg</pre>
+
+            <h3>2. Add the repository</h3>
+            <pre>sudo tee /etc/yum.repos.d/ngx-http-host-normalize.repo &lt;&lt; 'EOF'
+          [ngx-http-host-normalize]
+          name=Nginx Host Normalize Module
+          baseurl=https://linagora.github.io/ngx-http-host-normalize/rpm/el$releasever/x86_64/
+          enabled=1
+          gpgcheck=1
+          gpgkey=https://linagora.github.io/ngx-http-host-normalize/KEY.gpg
+          EOF</pre>
+
+            <h3>3. Install</h3>
+            <pre>sudo dnf install nginx-mod-http-host-normalize</pre>
+
+            <h3>4. Enable the module</h3>
+            <p>The module is automatically enabled on install. If you need to enable it manually:</p>
+            <pre>sudo ln -sf /usr/share/nginx/modules/mod-http-host-normalize.conf /etc/nginx/conf.d/mod-http-host-normalize.conf
+          sudo nginx -t && sudo systemctl reload nginx</pre>
+
             <h2>Links</h2>
             <ul>
-              <li><a href="https://github.com/LemonLDAPNG/ngx-http-host-normalize">GitHub Repository</a></li>
+              <li><a href="https://github.com/linagora/ngx-http-host-normalize">GitHub Repository</a></li>
               <li><a href="KEY.gpg">GPG Public Key</a></li>
             </ul>
 
