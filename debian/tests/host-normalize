@@ -9,30 +9,12 @@ TMPDIR=$(mktemp -d)
 
 cleanup() {
     [ -f "$TMPDIR/nginx.pid" ] && kill $(cat $TMPDIR/nginx.pid) 2>/dev/null || true
-    [ -n "$FCGI_PID" ] && kill $FCGI_PID 2>/dev/null || true
     sleep 0.3
     rm -rf "$TMPDIR"
 }
 trap cleanup EXIT
 
-# Create FastCGI server that echoes HTTP_HOST
-cat > $TMPDIR/fcgi-echo.pl << 'PERL'
-#!/usr/bin/env perl
-use strict;
-use FCGI;
-my $socket = FCGI::OpenSocket($ARGV[0], 5);
-my $request = FCGI::Request(\*STDIN, \*STDOUT, \*STDERR, \%ENV, $socket);
-while ($request->Accept() >= 0) {
-    print "Content-Type: text/plain\r\n\r\n";
-    print "HTTP_HOST=$ENV{HTTP_HOST}\n";
-    print "HOST=$ENV{RHOST}\n";
-    print "SERVER_NAME=$ENV{SERVER_NAME}\n";
-}
-PERL
-chmod +x $TMPDIR/fcgi-echo.pl
-
 PORT=18771
-FCGI_PORT=19771
 
 # Ensure module is loaded
 MODULE_SO="/usr/lib/nginx/modules/ngx_http_host_normalize_module.so"
@@ -46,12 +28,13 @@ else
     exit 1
 fi
 
+# Create nginx config that returns $host in response body
 cat > $TMPDIR/nginx.conf << EOF
 $LOAD_MODULE
 worker_processes 1;
 daemon off;
 pid $TMPDIR/nginx.pid;
-error_log $TMPDIR/nginx-error.log debug;
+error_log $TMPDIR/nginx-error.log info;
 events { worker_connections 64; }
 http {
     access_log off;
@@ -59,40 +42,12 @@ http {
         listen $PORT;
         server_name secure.example.com;
         location / {
-            fastcgi_pass 127.0.0.1:$FCGI_PORT;
-            include /etc/nginx/fastcgi_params;
-            fastcgi_param RHOST \$host;
+            add_header Content-Type text/plain;
+            return 200 "HOST=\$host\nHTTP_HOST=\$http_host\nSERVER_NAME=\$server_name\n";
         }
     }
 }
 EOF
-
-# Verify FCGI module first
-echo "Checking Perl FCGI module..."
-perl -MFCGI -e 'print "FCGI module version: $FCGI::VERSION\n"' 2>&1 || { echo "FCGI module NOT available"; exit 1; }
-
-# Start FastCGI server on TCP port
-echo "Starting FastCGI server on port $FCGI_PORT..."
-perl $TMPDIR/fcgi-echo.pl 127.0.0.1:$FCGI_PORT 2>$TMPDIR/fcgi.err &
-FCGI_PID=$!
-
-# Wait for FastCGI to start listening (retry up to 5 seconds)
-echo "Waiting for FastCGI to be ready..."
-for i in 1 2 3 4 5 6 7 8 9 10; do
-    if ss -tln 2>/dev/null | grep -q ":$FCGI_PORT" || netstat -tln 2>/dev/null | grep -q ":$FCGI_PORT"; then
-        echo "FastCGI server started on port $FCGI_PORT"
-        break
-    fi
-    if [ $i -eq 10 ]; then
-        echo "ERROR: FastCGI not listening on port $FCGI_PORT after 5 seconds"
-        echo "FastCGI stderr:"
-        cat $TMPDIR/fcgi.err 2>/dev/null || echo "(empty)"
-        echo "Process status:"
-        ps aux | grep -v grep | grep fcgi || echo "(no fcgi process)"
-        exit 1
-    fi
-    sleep 0.5
-done
 
 # Test nginx config first
 echo "Testing nginx configuration..."
@@ -106,7 +61,7 @@ sleep 0.5
 # Verify nginx is running
 if ! pgrep -f "nginx.*$TMPDIR" > /dev/null; then
     echo "ERROR: nginx failed to start"
-    cat $TMPDIR/nginx.conf
+    cat $TMPDIR/nginx-error.log 2>/dev/null || true
     exit 1
 fi
 echo "Nginx started successfully"
@@ -152,25 +107,28 @@ echo "$RESULT"
 echo "---"
 
 # Parse results (use sed for compatibility)
-HTTP_HOST=$(echo "$RESULT" | sed -n 's/^HTTP_HOST=//p' | head -1)
+# $host is what nginx uses internally (should be normalized by our module)
+# $http_host is the original Host header value
 HOST=$(echo "$RESULT" | sed -n 's/^HOST=//p' | head -1)
+HTTP_HOST=$(echo "$RESULT" | sed -n 's/^HTTP_HOST=//p' | head -1)
 SERVER_NAME=$(echo "$RESULT" | sed -n 's/^SERVER_NAME=//p' | head -1)
 
-echo "Backend received:"
-echo "  HTTP_HOST=$HTTP_HOST"
-echo "  HOST=$HOST"
-echo "  SERVER_NAME=$SERVER_NAME"
+echo "Nginx variables:"
+echo "  HOST (\$host)=$HOST"
+echo "  HTTP_HOST (\$http_host)=$HTTP_HOST"
+echo "  SERVER_NAME (\$server_name)=$SERVER_NAME"
 echo ""
 
+# The module normalizes $http_host to match the URI host
 if [ "$HTTP_HOST" = "secure.example.com" ]; then
-    echo "PASS: HTTP_HOST correctly normalized to URI host (RFC 9112 compliant)"
+    echo "PASS: \$http_host correctly normalized to URI host (RFC 9112 compliant)"
     exit 0
 elif [ "$HTTP_HOST" = "malicious.attacker.com" ]; then
-    echo "FAIL: HTTP_HOST contains spoofed value (VULNERABLE)"
+    echo "FAIL: \$http_host contains spoofed value (VULNERABLE)"
     exit 1
 else
     echo "UNKNOWN: HTTP_HOST=$HTTP_HOST"
     echo "Nginx error log:"
-    cat $TMPDIR/nginx-error.log 2>/dev/null | tail -50 || echo "(empty)"
+    cat $TMPDIR/nginx-error.log 2>/dev/null | tail -20 || echo "(empty)"
     exit 2
 fi
