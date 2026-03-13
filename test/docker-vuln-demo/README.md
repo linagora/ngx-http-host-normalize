@@ -18,6 +18,7 @@ when using absolute URIs with nginx reverse proxy.
 ## The Attack
 
 The attacker sends:
+
 ```
 GET http://public.local/ HTTP/1.1
 Host: protected.local
@@ -39,12 +40,13 @@ The proxy routes to `public.local` (from request line) but passes
 
 ## Test Results
 
-| nginx Version | Status |
-|---------------|--------|
+| nginx Version | Status         |
+| ------------- | -------------- |
 | 1.24          | **Vulnerable** |
 | 1.27          | **Vulnerable** |
+| 1.29.6        | **Vulnerable** |
 
-**Conclusion:** The reverse proxy vulnerability is NOT fixed in nginx.
+**Conclusion:** The reverse proxy vulnerability is NOT fixed in any nginx version (tested up to 1.29.6).
 Use `$host` instead of `$http_host`, or install ngx-http-host-normalize module.
 
 ## Manual Testing
@@ -71,5 +73,6 @@ docker compose down
 ## Fix
 
 Either:
+
 1. Install ngx-http-host-normalize module
 2. Use `$host` instead of `$http_host` in proxy_set_header
