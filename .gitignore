@@ -15,3 +15,11 @@ objs/
 
 # macOS
 .DS_Store
+
+# Debian build artifacts
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/*.substvars
+debian/libnginx-mod-http-host-normalize/
+nginx-build/

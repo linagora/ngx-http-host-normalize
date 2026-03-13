@@ -1,0 +1,31 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+NGINX_SRC := /usr/share/nginx/src
+MODULESDIR := /usr/lib/nginx/modules
+BUILDDIR := nginx-build
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	cp -r $(NGINX_SRC) $(BUILDDIR)
+	cd $(BUILDDIR) && ./configure --with-compat --add-dynamic-module=..
+
+override_dh_auto_build:
+	cd $(BUILDDIR) && make -f objs/Makefile modules
+
+override_dh_auto_install:
+	install -d debian/libnginx-mod-http-host-normalize$(MODULESDIR)
+	install -d debian/libnginx-mod-http-host-normalize/usr/share/nginx/modules-available
+	install -m 644 $(BUILDDIR)/objs/ngx_http_host_normalize_module.so \
+		debian/libnginx-mod-http-host-normalize$(MODULESDIR)/
+	echo "load_module modules/ngx_http_host_normalize_module.so;" > \
+		debian/libnginx-mod-http-host-normalize/usr/share/nginx/modules-available/mod-http-host-normalize.conf
+
+override_dh_auto_clean:
+	rm -rf $(BUILDDIR)
+
+override_dh_auto_test:
+	# Skip tests during build

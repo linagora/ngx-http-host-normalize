@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # Enable the module if nginx modules-enabled directory exists
+        if [ -d /etc/nginx/modules-enabled ] && [ ! -e /etc/nginx/modules-enabled/50-mod-http-host-normalize.conf ]; then
+            ln -sf /usr/share/nginx/modules-available/mod-http-host-normalize.conf \
+                /etc/nginx/modules-enabled/50-mod-http-host-normalize.conf
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

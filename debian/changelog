@@ -1,0 +1,8 @@
+libnginx-mod-http-host-normalize (1.0.0) unstable; urgency=medium
+
+  * Initial release
+  * Normalize Host header when absolute URI is used in request line
+  * Implements RFC 9112 Section 3.2.2 compliance
+  * Fixes security issue with Host header spoofing
+
+ -- LemonLDAP::NG Team <lemonldap-ng@ow2.org>  Thu, 13 Mar 2026 09:00:00 +0100

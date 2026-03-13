@@ -1,0 +1,31 @@
+Source: libnginx-mod-http-host-normalize
+Section: httpd
+Priority: optional
+Maintainer: LemonLDAP::NG Team <lemonldap-ng@ow2.org>
+Build-Depends: debhelper-compat (= 13),
+               nginx-dev (>= 1.22.0)
+Standards-Version: 4.6.2
+Homepage: https://github.com/LemonLDAPNG/ngx-http-host-normalize
+Rules-Requires-Root: no
+
+Package: libnginx-mod-http-host-normalize
+Architecture: any
+Multi-Arch: same
+Depends: ${misc:Depends},
+         ${shlibs:Depends},
+         nginx (>= 1.22.0) | nginx-full (>= 1.22.0) | nginx-light (>= 1.22.0) | nginx-extras (>= 1.22.0)
+Description: Nginx module to normalize Host header with absolute URI requests
+ This nginx module normalizes the Host header when an absolute URI is used
+ in the request line, as per RFC 9112 Section 3.2.2.
+ .
+ This fixes a security issue where an attacker can bypass access controls
+ by sending a request with an absolute URI pointing to one host while
+ setting the Host header to another host.
+ .
+ Example attack mitigated:
+   GET http://protected.example.com/ HTTP/1.1
+   Host: public.example.com
+ .
+ Without this module, backends (FastCGI, uWSGI, SCGI) receive HTTP_HOST
+ as "public.example.com" while the request is actually routed to
+ "protected.example.com".

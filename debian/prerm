@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove|purge)
+        # Remove the module symlink
+        rm -f /etc/nginx/modules-enabled/50-mod-http-host-normalize.conf
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0
