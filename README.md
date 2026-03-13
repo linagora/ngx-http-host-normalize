@@ -156,6 +156,93 @@ curl -v \
 Without the module, the backend receives `HTTP_HOST=public.example.com`.
 With the module, it correctly receives `HTTP_HOST=protected.example.com`.
 
+## Why Use This Module?
+
+This module normalizes `$http_host` at the source, which means:
+
+- **No configuration changes required** - existing `proxy_params`, `fastcgi_params` continue to work
+- **All variables are consistent** - both `$host` and `$http_host` have the correct value
+- **Third-party modules work correctly** - any module reading the Host header gets the right value
+- **Logging is accurate** - access logs show the correct host
+
+The alternatives below require configuration changes and may not cover all cases.
+
+## Alternatives
+
+If you cannot install this module, there are workarounds depending on your backend type.
+
+### Understanding Nginx Variables
+
+| Variable | Value | Safe? |
+|----------|-------|-------|
+| `$http_host` | Host header from client | **No** - can be spoofed with absolute URI |
+| `$host` | Host from request line, then Host header, then server_name | **Yes** - prioritizes request line |
+| `$server_name` | Value from `server_name` directive | **Yes** - but loses alias support |
+
+### FastCGI / uWSGI / SCGI
+
+The default `fastcgi_params`, `uwsgi_params`, and `scgi_params` files use `$server_name`
+for SERVER_NAME, which is safe but doesn't support virtual host aliases.
+
+**Option 1: Use SERVER_NAME (safe, but no aliases)**
+
+Applications should use `SERVER_NAME` instead of `HTTP_HOST`:
+```php
+// PHP: Use $_SERVER['SERVER_NAME'] instead of $_SERVER['HTTP_HOST']
+$host = $_SERVER['SERVER_NAME'];
+```
+
+**Option 2: Add HTTP_HOST with $host (safe, with aliases)**
+
+Add to your location block, **after** the `include fastcgi_params;` line:
+```nginx
+location ~ \.php$ {
+    include fastcgi_params;
+    fastcgi_param HTTP_HOST $host;  # Must be after include
+    fastcgi_pass unix:/run/php/php-fpm.sock;
+}
+```
+
+This passes the correct host even with absolute URI attacks.
+
+### Reverse Proxy (proxy_pass)
+
+The default `/etc/nginx/proxy_params` uses `$http_host`, which is **vulnerable**.
+
+**Fix: Use $host instead of $http_host**
+
+Either modify `/etc/nginx/proxy_params`:
+```nginx
+proxy_set_header Host $host;  # Changed from $http_host
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+Or override in your server/location block:
+```nginx
+location / {
+    proxy_pass http://backend;
+    proxy_set_header Host $host;
+}
+```
+
+### Testing Your Setup
+
+You can test if your setup is vulnerable:
+
+```bash
+# Send request with mismatched Host header and request-target
+curl -v \
+  --header 'Host: attacker.com' \
+  --request-target 'http://your-server.com/' \
+  http://your-server.com/debug
+
+# Check what HTTP_HOST your backend receives
+# Vulnerable: HTTP_HOST=attacker.com
+# Safe: HTTP_HOST=your-server.com
+```
+
 ## Compatibility
 
 - Nginx 1.11.5+ (for dynamic module support)
