@@ -14,12 +14,11 @@ Cookie: session=xxx
 ```
 
 Nginx routes the request to `protected.example.com` but passes
-`HTTP_HOST=public.example.com` to backends (FastCGI, uWSGI, SCGI).
+`HTTP_HOST=public.example.com` to backends _(FastCGI, uWSGI, SCGI, any host configured in a `proxy_pass`)_.
 
 This creates a **security vulnerability** where:
 - Access control decisions based on `HTTP_HOST` use the wrong host
 - Applications may serve content for the wrong virtual host
-- Session/cookie handling may be compromised
 
 ## The Solution
 
@@ -112,7 +111,6 @@ With the module, it correctly receives `HTTP_HOST=protected.example.com`.
 
 ## Related Issues
 
-- [LemonLDAP::NG #3556](https://gitlab.ow2.org/lemonldap-ng/lemonldap-ng/-/issues/3556) - Original security report
 - [Nginx commit 71b18973b](https://github.com/nginx/nginx/commit/71b18973b) - Partial fix for FastCGI only
 
 ## License
