@@ -16,8 +16,8 @@
  * as "public.example.com" while the request is actually routed to
  * "protected.example.com".
  *
- * Copyright (c) 2026 LemonLDAP::NG Team
- * Licensed under the BSD 2-Clause License
+ * Copyright (c) 2026 LINAGORA <https://linagora.com>
+ * Licensed under the AGPL-3.0 license
  */
 
 #include <ngx_config.h>

@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: ngx-http-host-normalize
-Upstream-Contact: LemonLDAP::NG Team <lemonldap-ng@ow2.org>
-Source: https://github.com/LemonLDAPNG/ngx-http-host-normalize
+Upstream-Contact: LINAGORA <https://github.com/linagora/ngx-http-host-normalize/issues>
+Source: https://github.com/linagora/ngx-http-host-normalize
 
 Files: *
 Copyright: 2026 LINAGORA <https://linagora.com>

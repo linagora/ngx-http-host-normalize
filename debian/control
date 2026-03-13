@@ -1,11 +1,11 @@
 Source: libnginx-mod-http-host-normalize
 Section: httpd
 Priority: optional
-Maintainer: LemonLDAP::NG Team <lemonldap-ng@ow2.org>
+Maintainer: LINAGORA <https://github.com/linagora/ngx-http-host-normalize/>
 Build-Depends: debhelper-compat (= 13),
                nginx-dev (>= 1.22.0)
 Standards-Version: 4.6.2
-Homepage: https://github.com/LemonLDAPNG/ngx-http-host-normalize
+Homepage: https://github.com/linagora/ngx-http-host-normalize
 Rules-Requires-Root: no
 
 Package: libnginx-mod-http-host-normalize
