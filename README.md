@@ -17,6 +17,7 @@ Nginx routes the request to `protected.example.com` but passes
 `HTTP_HOST=public.example.com` to backends _(FastCGI, uWSGI, SCGI, any host configured in a `proxy_pass`)_.
 
 This creates a **security vulnerability** where:
+
 - Access control decisions based on `HTTP_HOST` use the wrong host
 - Applications may serve content for the wrong virtual host
 
@@ -173,11 +174,11 @@ If you cannot install this module, there are workarounds depending on your backe
 
 ### Understanding Nginx Variables
 
-| Variable | Value | Safe? |
-|----------|-------|-------|
-| `$http_host` | Host header from client | **No** - can be spoofed with absolute URI |
-| `$host` | Host from request line, then Host header, then server_name | **Yes** - prioritizes request line |
-| `$server_name` | Value from `server_name` directive | **Yes** - but loses alias support |
+| Variable       | Value                                                      | Safe?                                     |
+| -------------- | ---------------------------------------------------------- | ----------------------------------------- |
+| `$http_host`   | Host header from client                                    | **No** - can be spoofed with absolute URI |
+| `$host`        | Host from request line, then Host header, then server_name | **Yes** - prioritizes request line        |
+| `$server_name` | Value from `server_name` directive                         | **Yes** - but loses alias support         |
 
 ### FastCGI / uWSGI / SCGI
 
@@ -187,6 +188,7 @@ for SERVER_NAME, which is safe but doesn't support virtual host aliases.
 **Option 1: Use SERVER_NAME (safe, but no aliases)**
 
 Applications should use `SERVER_NAME` instead of `HTTP_HOST`:
+
 ```php
 // PHP: Use $_SERVER['SERVER_NAME'] instead of $_SERVER['HTTP_HOST']
 $host = $_SERVER['SERVER_NAME'];
@@ -195,6 +197,7 @@ $host = $_SERVER['SERVER_NAME'];
 **Option 2: Add HTTP_HOST with $host (safe, with aliases)**
 
 Add to your location block, **after** the `include fastcgi_params;` line:
+
 ```nginx
 location ~ \.php$ {
     include fastcgi_params;
@@ -212,6 +215,7 @@ The default `/etc/nginx/proxy_params` uses `$http_host`, which is **vulnerable**
 **Fix: Use $host instead of $http_host**
 
 Either modify `/etc/nginx/proxy_params`:
+
 ```nginx
 proxy_set_header Host $host;  # Changed from $http_host
 proxy_set_header X-Real-IP $remote_addr;
@@ -220,6 +224,7 @@ proxy_set_header X-Forwarded-Proto $scheme;
 ```
 
 Or override in your server/location block:
+
 ```nginx
 location / {
     proxy_pass http://backend;
