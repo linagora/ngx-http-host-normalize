@@ -116,9 +116,8 @@ ngx_http_host_normalize_handler(ngx_http_request_t *r)
     /* Also update the host field that nginx uses internally */
     r->headers_in.host->value = r->headers_in.server;
 
-    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "host_normalize: normalized Host header to \"%V\" "
-                   "(was absolute URI request)",
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "host_normalize: normalized Host header to \"%V\"",
                    &r->headers_in.server);
 
     return NGX_DECLINED;
