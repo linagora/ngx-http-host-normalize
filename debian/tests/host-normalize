@@ -95,18 +95,38 @@ echo "  curl --request-target 'http://secure.example.com/'"
 echo "       -H 'Host: malicious.attacker.com' http://127.0.0.1:$PORT/"
 echo ""
 
+# Disable set -e for curl to capture errors properly
+set +e
 RESULT=$(curl -s --max-time 5 --request-target 'http://secure.example.com/' \
     -H 'Host: malicious.attacker.com' http://127.0.0.1:$PORT/ 2>&1)
 CURL_RC=$?
+set -e
+
 if [ $CURL_RC -ne 0 ]; then
     echo "ERROR: curl failed with exit code $CURL_RC"
     echo "Result: $RESULT"
-    exit 1
+    # Check if --request-target is supported
+    if echo "$RESULT" | grep -q "option --request-target"; then
+        echo "curl does not support --request-target, trying alternative method..."
+        # Alternative: use printf and netcat
+        set +e
+        RESULT=$(printf 'GET http://secure.example.com/ HTTP/1.1\r\nHost: malicious.attacker.com\r\nConnection: close\r\n\r\n' | \
+            nc -q1 127.0.0.1 $PORT 2>&1)
+        CURL_RC=$?
+        set -e
+        if [ $CURL_RC -ne 0 ]; then
+            echo "ERROR: netcat also failed"
+            exit 1
+        fi
+    else
+        exit 1
+    fi
 fi
 
-HTTP_HOST=$(echo "$RESULT" | grep -oP 'HTTP_HOST=\K.*')
-HOST=$(echo "$RESULT" | grep -oP 'HOST=\K.*')
-SERVER_NAME=$(echo "$RESULT" | grep -oP 'SERVER_NAME=\K.*')
+# Parse results (use sed for compatibility)
+HTTP_HOST=$(echo "$RESULT" | sed -n 's/^HTTP_HOST=//p' | head -1)
+HOST=$(echo "$RESULT" | sed -n 's/^HOST=//p' | head -1)
+SERVER_NAME=$(echo "$RESULT" | sed -n 's/^SERVER_NAME=//p' | head -1)
 
 echo "Backend received:"
 echo "  HTTP_HOST=$HTTP_HOST"

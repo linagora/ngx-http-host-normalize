@@ -49,7 +49,8 @@ jobs:
             nginx-full \
             libfcgi-perl \
             curl \
-            procps
+            procps \
+            netcat-openbsd
 
       - name: Install built package
         run: |
