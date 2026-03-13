@@ -47,10 +47,13 @@ jobs:
         run: |
           apt-get install -y \
             nginx-full \
+            perl \
             libfcgi-perl \
             curl \
             procps \
             netcat-openbsd
+          # Verify FCGI module is available
+          perl -MFCGI -e 'print "FCGI module version: $FCGI::VERSION\n"'
 
       - name: Install built package
         run: |

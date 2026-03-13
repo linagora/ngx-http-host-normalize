@@ -50,7 +50,7 @@ $LOAD_MODULE
 worker_processes 1;
 daemon off;
 pid $TMPDIR/nginx.pid;
-error_log /dev/null;
+error_log $TMPDIR/nginx-error.log debug;
 events { worker_connections 64; }
 http {
     access_log off;
@@ -66,17 +66,23 @@ http {
 }
 EOF
 
+# Verify FCGI module first
+echo "Checking Perl FCGI module..."
+perl -MFCGI -e 'print "FCGI module version: $FCGI::VERSION\n"' 2>&1 || { echo "FCGI module NOT available"; exit 1; }
+
 # Start FastCGI server
 echo "Starting FastCGI server..."
-perl $TMPDIR/fcgi-echo.pl $TMPDIR/fcgi.sock &
+perl $TMPDIR/fcgi-echo.pl $TMPDIR/fcgi.sock 2>$TMPDIR/fcgi.err &
 FCGI_PID=$!
 sleep 1
 
 # Verify FastCGI socket exists
 if [ ! -S "$TMPDIR/fcgi.sock" ]; then
     echo "ERROR: FastCGI socket not created at $TMPDIR/fcgi.sock"
-    echo "Checking if perl FCGI is available..."
-    perl -MFCGI -e 'print "FCGI module OK\n"' 2>&1 || echo "FCGI module NOT available"
+    echo "FastCGI stderr:"
+    cat $TMPDIR/fcgi.err 2>/dev/null || echo "(empty)"
+    echo "Process status:"
+    ps aux | grep fcgi || echo "(no fcgi process)"
     exit 1
 fi
 echo "FastCGI server started, socket: $TMPDIR/fcgi.sock"
@@ -157,5 +163,7 @@ elif [ "$HTTP_HOST" = "malicious.attacker.com" ]; then
     exit 1
 else
     echo "UNKNOWN: HTTP_HOST=$HTTP_HOST"
+    echo "Nginx error log:"
+    cat $TMPDIR/nginx-error.log 2>/dev/null | tail -50 || echo "(empty)"
     exit 2
 fi
