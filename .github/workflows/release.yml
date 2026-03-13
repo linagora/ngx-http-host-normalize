@@ -1,0 +1,313 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-deb:
+    name: Build .deb (${{ matrix.codename }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container: ${{ matrix.container }}
+
+    strategy:
+      matrix:
+        include:
+          - distro: debian
+            codename: bookworm
+            container: debian:bookworm
+          - distro: debian
+            codename: trixie
+            container: debian:trixie
+          - distro: debian
+            codename: sid
+            container: debian:sid
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential \
+            debhelper \
+            nginx-dev \
+            devscripts \
+            fakeroot
+
+      - name: Build Debian package
+        run: |
+          dpkg-buildpackage -us -uc -b
+
+      - name: Move packages
+        run: |
+          mkdir -p packages
+          mv ../*.deb packages/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.codename }}
+          path: packages/*.deb
+          retention-days: 7
+
+  create-repo:
+    name: Create APT Repository
+    runs-on: ubuntu-latest
+    needs: build-deb
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Import GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
+          echo "GPG_KEY_ID=$KEY_ID" >> $GITHUB_ENV
+
+      - name: Install repository tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev apt-utils
+
+      - name: Create APT repository structure
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          mkdir -p repo
+
+          # Export public key
+          gpg --armor --export "$GPG_KEY_ID" > repo/KEY.gpg
+
+          # Create repository for each distribution
+          for codename in bookworm trixie sid; do
+            echo "Processing $codename..."
+
+            # Create directory structure
+            mkdir -p "repo/dists/${codename}/main/binary-amd64"
+
+            # Copy .deb files
+            if [ -d "artifacts/deb-${codename}" ]; then
+              cp artifacts/deb-${codename}/*.deb "repo/dists/${codename}/main/binary-amd64/"
+            fi
+
+            # Generate Packages file
+            cd repo
+            dpkg-scanpackages --arch amd64 "dists/${codename}/main/binary-amd64" > "dists/${codename}/main/binary-amd64/Packages"
+            gzip -k "dists/${codename}/main/binary-amd64/Packages"
+            cd ..
+
+            # Create Release file
+            cd "repo/dists/${codename}"
+
+            PACKAGES_FILE="main/binary-amd64/Packages"
+            PACKAGES_GZ_FILE="main/binary-amd64/Packages.gz"
+
+            MD5_PACKAGES=$(md5sum "$PACKAGES_FILE" | cut -d' ' -f1)
+            MD5_PACKAGES_GZ=$(md5sum "$PACKAGES_GZ_FILE" | cut -d' ' -f1)
+            SHA256_PACKAGES=$(sha256sum "$PACKAGES_FILE" | cut -d' ' -f1)
+            SHA256_PACKAGES_GZ=$(sha256sum "$PACKAGES_GZ_FILE" | cut -d' ' -f1)
+            SIZE_PACKAGES=$(stat -c%s "$PACKAGES_FILE")
+            SIZE_PACKAGES_GZ=$(stat -c%s "$PACKAGES_GZ_FILE")
+
+            cat > Release << EOF
+          Origin: ngx-http-host-normalize
+          Label: ngx-http-host-normalize
+          Suite: stable
+          Codename: ${codename}
+          Architectures: amd64
+          Components: main
+          Description: Nginx Host Normalize Module APT Repository
+          Date: $(date -Ru)
+          MD5Sum:
+           ${MD5_PACKAGES} ${SIZE_PACKAGES} ${PACKAGES_FILE}
+           ${MD5_PACKAGES_GZ} ${SIZE_PACKAGES_GZ} ${PACKAGES_GZ_FILE}
+          SHA256:
+           ${SHA256_PACKAGES} ${SIZE_PACKAGES} ${PACKAGES_FILE}
+           ${SHA256_PACKAGES_GZ} ${SIZE_PACKAGES_GZ} ${PACKAGES_GZ_FILE}
+          EOF
+
+            # Sign Release file
+            echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+              --clearsign -o InRelease Release
+            echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+              -abs -o Release.gpg Release
+
+            cd ../../..
+          done
+
+      - name: Create index.html
+        run: |
+          cat > repo/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>ngx-http-host-normalize Repository</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 900px; margin: 50px auto; padding: 20px; }
+              pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
+              code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
+              h1 { color: #333; }
+              h2 { color: #555; margin-top: 40px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+              h3 { color: #666; margin-top: 25px; }
+            </style>
+          </head>
+          <body>
+            <h1>ngx-http-host-normalize Repository</h1>
+            <p>This repository provides Debian packages for <a href="https://github.com/LemonLDAPNG/ngx-http-host-normalize">ngx-http-host-normalize</a>,
+               an Nginx module that normalizes the Host header when an absolute URI is used in the request line (RFC 9112 Section 3.2.2).</p>
+
+            <h2>Supported Distributions</h2>
+            <ul>
+              <li><strong>Debian 12</strong> (bookworm)</li>
+              <li><strong>Debian 13</strong> (trixie)</li>
+              <li><strong>Debian unstable</strong> (sid)</li>
+            </ul>
+
+            <h2>Installation</h2>
+
+            <h3>1. Add the GPG key</h3>
+            <pre>curl -fsSL https://lemonldapng.github.io/ngx-http-host-normalize/KEY.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/ngx-http-host-normalize.gpg</pre>
+
+            <h3>2. Add the repository</h3>
+            <p>For <strong>Debian 12 (bookworm)</strong>:</p>
+            <pre>echo "deb [signed-by=/etc/apt/keyrings/ngx-http-host-normalize.gpg] https://lemonldapng.github.io/ngx-http-host-normalize bookworm main" | sudo tee /etc/apt/sources.list.d/ngx-http-host-normalize.list</pre>
+
+            <p>For <strong>Debian 13 (trixie)</strong>:</p>
+            <pre>echo "deb [signed-by=/etc/apt/keyrings/ngx-http-host-normalize.gpg] https://lemonldapng.github.io/ngx-http-host-normalize trixie main" | sudo tee /etc/apt/sources.list.d/ngx-http-host-normalize.list</pre>
+
+            <p>For <strong>Debian unstable (sid)</strong>:</p>
+            <pre>echo "deb [signed-by=/etc/apt/keyrings/ngx-http-host-normalize.gpg] https://lemonldapng.github.io/ngx-http-host-normalize sid main" | sudo tee /etc/apt/sources.list.d/ngx-http-host-normalize.list</pre>
+
+            <h3>3. Install</h3>
+            <pre>sudo apt update
+          sudo apt install libnginx-mod-http-host-normalize</pre>
+
+            <h3>4. Enable the module</h3>
+            <p>The module is automatically enabled on install. If you need to enable it manually:</p>
+            <pre>sudo ln -sf /usr/share/nginx/modules-available/mod-http-host-normalize.conf /etc/nginx/modules-enabled/50-mod-http-host-normalize.conf
+          sudo nginx -t && sudo systemctl reload nginx</pre>
+
+            <h2>Links</h2>
+            <ul>
+              <li><a href="https://github.com/LemonLDAPNG/ngx-http-host-normalize">GitHub Repository</a></li>
+              <li><a href="KEY.gpg">GPG Public Key</a></li>
+            </ul>
+
+            <hr style="margin-top: 40px;">
+            <p style="color: #888; font-size: 0.9em;">
+              &copy; 2026 <a href="https://linagora.com">LINAGORA</a> - Licensed under AGPL-3.0
+            </p>
+          </body>
+          </html>
+          EOF
+
+      - name: Generate directory indexes
+        run: |
+          cd repo
+          find . -type d | while read dir; do
+            [ "$dir" = "." ] && continue
+            relpath="${dir#./}"
+
+            cat > "$dir/index.html" << DIREOF
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Index of /${relpath}/</title>
+            <style>
+              body { font-family: monospace; margin: 20px; }
+              h1 { border-bottom: 1px solid #ccc; padding-bottom: 10px; }
+              table { border-collapse: collapse; }
+              td, th { padding: 5px 15px; text-align: left; }
+              a { text-decoration: none; }
+              a:hover { text-decoration: underline; }
+            </style>
+          </head>
+          <body>
+            <h1>Index of /${relpath}/</h1>
+            <table>
+              <tr><th>Name</th><th>Size</th></tr>
+              <tr><td><a href="../">../</a></td><td>-</td></tr>
+          DIREOF
+
+            for item in "$dir"/*; do
+              [ -e "$item" ] || continue
+              name=$(basename "$item")
+              [ "$name" = "index.html" ] && continue
+
+              if [ -d "$item" ]; then
+                echo "      <tr><td><a href=\"${name}/\">${name}/</a></td><td>-</td></tr>" >> "$dir/index.html"
+              else
+                size=$(stat -c%s "$item" 2>/dev/null || echo "0")
+                if [ "$size" -gt 1048576 ]; then
+                  hsize="$(echo "scale=1; $size/1048576" | bc)M"
+                elif [ "$size" -gt 1024 ]; then
+                  hsize="$(echo "scale=1; $size/1024" | bc)K"
+                else
+                  hsize="${size}B"
+                fi
+                echo "      <tr><td><a href=\"${name}\">${name}</a></td><td>${hsize}</td></tr>" >> "$dir/index.html"
+              fi
+            done
+
+            cat >> "$dir/index.html" << DIREOF
+            </table>
+          </body>
+          </html>
+          DIREOF
+          done
+          cd ..
+
+      - name: Upload repository
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo
+          path: repo/
+          retention-days: 7
+
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: create-repo
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Download repository
+        uses: actions/download-artifact@v4
+        with:
+          name: repo
+          path: repo
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: repo
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
