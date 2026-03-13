@@ -75,18 +75,24 @@ perl -MFCGI -e 'print "FCGI module version: $FCGI::VERSION\n"' 2>&1 || { echo "F
 echo "Starting FastCGI server on port $FCGI_PORT..."
 perl $TMPDIR/fcgi-echo.pl :$FCGI_PORT 2>$TMPDIR/fcgi.err &
 FCGI_PID=$!
-sleep 1
 
-# Verify FastCGI is listening
-if ! ss -tln 2>/dev/null | grep -q ":$FCGI_PORT" && ! netstat -tln 2>/dev/null | grep -q ":$FCGI_PORT"; then
-    echo "ERROR: FastCGI not listening on port $FCGI_PORT"
-    echo "FastCGI stderr:"
-    cat $TMPDIR/fcgi.err 2>/dev/null || echo "(empty)"
-    echo "Process status:"
-    ps aux | grep -v grep | grep fcgi || echo "(no fcgi process)"
-    exit 1
-fi
-echo "FastCGI server started on port $FCGI_PORT"
+# Wait for FastCGI to start listening (retry up to 5 seconds)
+echo "Waiting for FastCGI to be ready..."
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    if ss -tln 2>/dev/null | grep -q ":$FCGI_PORT" || netstat -tln 2>/dev/null | grep -q ":$FCGI_PORT"; then
+        echo "FastCGI server started on port $FCGI_PORT"
+        break
+    fi
+    if [ $i -eq 10 ]; then
+        echo "ERROR: FastCGI not listening on port $FCGI_PORT after 5 seconds"
+        echo "FastCGI stderr:"
+        cat $TMPDIR/fcgi.err 2>/dev/null || echo "(empty)"
+        echo "Process status:"
+        ps aux | grep -v grep | grep fcgi || echo "(no fcgi process)"
+        exit 1
+    fi
+    sleep 0.5
+done
 
 # Test nginx config first
 echo "Testing nginx configuration..."
