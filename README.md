@@ -175,11 +175,16 @@ If you cannot install this module, there are workarounds depending on your backe
 
 ### Understanding Nginx Variables
 
-| Variable       | Value                                                      | Safe?                                     |
-| -------------- | ---------------------------------------------------------- | ----------------------------------------- |
-| `$http_host`   | Host header from client                                    | **No** - can be spoofed with absolute URI |
-| `$host`        | Host from request line, then Host header, then server_name | **Yes** - prioritizes request line        |
-| `$server_name` | Value from `server_name` directive                         | **Yes** - but loses alias support         |
+| Variable       | Value                                                      | Safe?                                                                                                                                 |
+| -------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `$http_host`   | Host header from client                                    | **No** - can be spoofed with absolute URI since Nginx chose to ignore [RFC 9112](https://httpwg.org/specs/rfc9112.html#absolute-form) |
+| `$host`        | Host from request line, then Host header, then server_name | **Yes** - prioritizes request line                                                                                                    |
+| `$server_name` | Value from `server_name` directive                         | **Yes** - but loses alias support                                                                                                     |
+
+
+**Note**: issue is fixed in Nginx version 2.19.5 for FastCGI only but they
+don't want to backport this to other protocols considering that it's not an
+issue but a behavior.
 
 ### FastCGI / uWSGI / SCGI
 
