@@ -32,6 +32,7 @@ PERL
 chmod +x $TMPDIR/fcgi-echo.pl
 
 PORT=18771
+FCGI_PORT=19771
 
 # Ensure module is loaded
 MODULE_SO="/usr/lib/nginx/modules/ngx_http_host_normalize_module.so"
@@ -58,7 +59,7 @@ http {
         listen $PORT;
         server_name secure.example.com;
         location / {
-            fastcgi_pass unix:$TMPDIR/fcgi.sock;
+            fastcgi_pass 127.0.0.1:$FCGI_PORT;
             include /etc/nginx/fastcgi_params;
             fastcgi_param RHOST \$host;
         }
@@ -70,22 +71,22 @@ EOF
 echo "Checking Perl FCGI module..."
 perl -MFCGI -e 'print "FCGI module version: $FCGI::VERSION\n"' 2>&1 || { echo "FCGI module NOT available"; exit 1; }
 
-# Start FastCGI server
-echo "Starting FastCGI server..."
-perl $TMPDIR/fcgi-echo.pl $TMPDIR/fcgi.sock 2>$TMPDIR/fcgi.err &
+# Start FastCGI server on TCP port
+echo "Starting FastCGI server on port $FCGI_PORT..."
+perl $TMPDIR/fcgi-echo.pl :$FCGI_PORT 2>$TMPDIR/fcgi.err &
 FCGI_PID=$!
 sleep 1
 
-# Verify FastCGI socket exists
-if [ ! -S "$TMPDIR/fcgi.sock" ]; then
-    echo "ERROR: FastCGI socket not created at $TMPDIR/fcgi.sock"
+# Verify FastCGI is listening
+if ! ss -tln 2>/dev/null | grep -q ":$FCGI_PORT" && ! netstat -tln 2>/dev/null | grep -q ":$FCGI_PORT"; then
+    echo "ERROR: FastCGI not listening on port $FCGI_PORT"
     echo "FastCGI stderr:"
     cat $TMPDIR/fcgi.err 2>/dev/null || echo "(empty)"
     echo "Process status:"
-    ps aux | grep fcgi || echo "(no fcgi process)"
+    ps aux | grep -v grep | grep fcgi || echo "(no fcgi process)"
     exit 1
 fi
-echo "FastCGI server started, socket: $TMPDIR/fcgi.sock"
+echo "FastCGI server started on port $FCGI_PORT"
 
 # Test nginx config first
 echo "Testing nginx configuration..."
