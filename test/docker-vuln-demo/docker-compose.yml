@@ -1,0 +1,42 @@
+# This demo shows the Host header spoofing vulnerability with absolute URIs
+#
+# Architecture:
+#   Client -> Reverse Proxy (nginx) -> Backend (nginx with 2 vhosts)
+#
+# The backend has two virtual hosts:
+#   - public.local    : Exposed through the proxy
+#   - protected.local : NOT exposed (should be inaccessible)
+#
+# The vulnerability allows an attacker to access protected.local by sending:
+#   GET http://public.local/ HTTP/1.1
+#   Host: protected.local
+
+services:
+  # Reverse proxy - the component we're testing
+  proxy:
+    image: nginx:${NGINX_VERSION:-1.24}
+    ports:
+      - "8888:80"
+    volumes:
+      - ./proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./proxy/proxy_params:/etc/nginx/proxy_params:ro
+    depends_on:
+      - backend
+    networks:
+      internal:
+        aliases:
+          - public.local
+
+  # Backend server with 2 virtual hosts
+  backend:
+    image: nginx:1.24
+    volumes:
+      - ./backend/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./backend/public.html:/var/www/public/index.html:ro
+      - ./backend/protected.html:/var/www/protected/index.html:ro
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
