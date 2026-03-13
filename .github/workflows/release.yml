@@ -33,6 +33,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Get version from tag
+        id: version
+        run: |
+          # Extract version from tag (e.g., v1.0.0 -> 1.0.0)
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version from tag: $VERSION"
+
       - name: Install build dependencies
         run: |
           apt-get update
@@ -42,6 +50,14 @@ jobs:
             nginx-dev \
             devscripts \
             fakeroot
+
+      - name: Update changelog version
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Update the version in debian/changelog
+          sed -i "1s/([^)]*)/($VERSION)/" debian/changelog
+          echo "Updated debian/changelog:"
+          head -1 debian/changelog
 
       - name: Build Debian package
         run: |
@@ -82,6 +98,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: |
+          # Extract version from tag (e.g., v1.0.0 -> 1.0.0)
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version from tag: $VERSION"
 
       - name: Install build dependencies
         run: |
@@ -149,10 +173,13 @@ jobs:
 
       - name: Build RPM package
         run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DATE=$(date '+%a %b %d %Y')
+
           # Use simplified spec for pre-built module
           cat > ~/rpmbuild/SPECS/nginx-mod-http-host-normalize.spec << 'SPECEOF'
           Name:           nginx-mod-http-host-normalize
-          Version:        0.1.0
+          Version:        __VERSION__
           Release:        1%{?dist}
           Summary:        Nginx module to normalize Host header for absolute URI requests
 
@@ -181,9 +208,13 @@ jobs:
           %{_datadir}/nginx/modules/mod-http-host-normalize.conf
 
           %changelog
-          * Thu Mar 13 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.0-1
-          - Initial RPM package
+          * __DATE__ LINAGORA <info@linagora.com> - __VERSION__-1
+          - Release __VERSION__
           SPECEOF
+
+          # Replace placeholders with actual values
+          sed -i "s/__VERSION__/${VERSION}/g" ~/rpmbuild/SPECS/nginx-mod-http-host-normalize.spec
+          sed -i "s/__DATE__/${DATE}/g" ~/rpmbuild/SPECS/nginx-mod-http-host-normalize.spec
 
           rpmbuild -bb ~/rpmbuild/SPECS/nginx-mod-http-host-normalize.spec
 
