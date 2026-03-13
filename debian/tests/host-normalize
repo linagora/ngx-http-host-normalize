@@ -34,10 +34,15 @@ chmod +x $TMPDIR/fcgi-echo.pl
 PORT=18771
 
 # Ensure module is loaded
-if [ -f /usr/share/nginx/modules-available/mod-http-host-normalize.conf ]; then
-    LOAD_MODULE="load_module /usr/lib/nginx/modules/ngx_http_host_normalize_module.so;"
+MODULE_SO="/usr/lib/nginx/modules/ngx_http_host_normalize_module.so"
+if [ -f "$MODULE_SO" ]; then
+    LOAD_MODULE="load_module $MODULE_SO;"
+    echo "Module found: $MODULE_SO"
 else
-    LOAD_MODULE=""
+    echo "ERROR: Module not found at $MODULE_SO"
+    echo "Available modules:"
+    ls -la /usr/lib/nginx/modules/ 2>/dev/null || echo "  (none)"
+    exit 1
 fi
 
 cat > $TMPDIR/nginx.conf << EOF
