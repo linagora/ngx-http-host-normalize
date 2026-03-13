@@ -1,0 +1,124 @@
+# ngx-http-host-normalize
+
+Nginx module to normalize the Host header when an absolute URI is used in the
+request line, implementing RFC 9112 Section 3.2.2 compliance.
+
+## The Problem
+
+When a client sends an HTTP request with an absolute URI in the request line:
+
+```
+GET http://protected.example.com/ HTTP/1.1
+Host: public.example.com
+Cookie: session=xxx
+```
+
+Nginx routes the request to `protected.example.com` but passes
+`HTTP_HOST=public.example.com` to backends (FastCGI, uWSGI, SCGI).
+
+This creates a **security vulnerability** where:
+- Access control decisions based on `HTTP_HOST` use the wrong host
+- Applications may serve content for the wrong virtual host
+- Session/cookie handling may be compromised
+
+## The Solution
+
+This module hooks into Nginx's `POST_READ` phase and normalizes the Host
+header to match the host from the absolute URI, ensuring backends receive
+the correct `HTTP_HOST` value.
+
+## RFC 9112 Compliance
+
+[RFC 9112 Section 3.2.2](https://httpwg.org/specs/rfc9112.html#absolute-form)
+states:
+
+> "When an origin server receives a request with an absolute-form of
+> request-target, the origin server MUST ignore the received Host header
+> field (if any) and instead use the host information of the request-target."
+
+## Installation
+
+### Building as a Dynamic Module
+
+```bash
+# Download nginx source (match your installed version)
+nginx -v  # Check version
+wget http://nginx.org/download/nginx-X.Y.Z.tar.gz
+tar xzf nginx-X.Y.Z.tar.gz
+cd nginx-X.Y.Z
+
+# Configure with the module
+./configure --with-compat --add-dynamic-module=/path/to/ngx-http-host-normalize
+
+# Build the module
+make modules
+
+# Install the module
+sudo cp objs/ngx_http_host_normalize_module.so /usr/lib/nginx/modules/
+```
+
+### Building Statically
+
+```bash
+cd nginx-X.Y.Z
+./configure --add-module=/path/to/ngx-http-host-normalize
+make
+sudo make install
+```
+
+## Configuration
+
+### Dynamic Module
+
+Add to your `nginx.conf`:
+
+```nginx
+load_module modules/ngx_http_host_normalize_module.so;
+```
+
+### Static Module
+
+No configuration needed - the module is automatically active.
+
+## How It Works
+
+1. Module registers a handler in the `NGX_HTTP_POST_READ_PHASE`
+2. For each request, it checks if `r->headers_in.server` is set (indicates
+   an absolute URI was used)
+3. If set, it replaces the Host header value with the host from the
+   request-target
+4. All subsequent processing (including backend proxying) uses the
+   normalized Host value
+
+## Testing
+
+Test the vulnerability (before installing the module):
+
+```bash
+curl -v \
+  --cookie "session=xxx" \
+  --header 'Host: public.example.com' \
+  --request-target 'http://protected.example.com/' \
+  http://protected.example.com/
+```
+
+Without the module, the backend receives `HTTP_HOST=public.example.com`.
+With the module, it correctly receives `HTTP_HOST=protected.example.com`.
+
+## Compatibility
+
+- Nginx 1.11.5+ (for dynamic module support)
+- Works with all backend protocols: FastCGI, uWSGI, SCGI, proxy_pass
+
+## Related Issues
+
+- [LemonLDAP::NG #3556](https://gitlab.ow2.org/lemonldap-ng/lemonldap-ng/-/issues/3556) - Original security report
+- [Nginx commit 71b18973b](https://github.com/nginx/nginx/commit/71b18973b) - Partial fix for FastCGI only
+
+## License
+
+BSD 2-Clause License. See [LICENSE](LICENSE) file.
+
+## Authors
+
+- LemonLDAP::NG Team

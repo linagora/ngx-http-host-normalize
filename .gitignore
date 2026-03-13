@@ -1,0 +1,17 @@
+# Build artifacts
+*.o
+*.so
+*.a
+
+# Nginx build directory
+objs/
+
+# Editor files
+*~
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
