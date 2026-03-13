@@ -14,7 +14,8 @@ Cookie: session=xxx
 ```
 
 Nginx routes the request to `protected.example.com` but passes
-`HTTP_HOST=public.example.com` to backends _(FastCGI, uWSGI, SCGI, any host configured in a `proxy_pass`)_.
+`HTTP_HOST=public.example.com` to backends _(FastCGI, uWSGI, SCGI, any host
+configured in a `proxy_pass` whith Debian's `proxy_params` file)_.
 
 This creates a **security vulnerability** where:
 
