@@ -14,21 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    container:
-      image: ${{ matrix.container }}
-      options: --platform=${{ matrix.platform }}
 
     strategy:
       matrix:
         codename: [bookworm, trixie, sid]
         arch: [amd64, arm64, armhf, s390x]
         include:
-          - codename: bookworm
-            container: debian:bookworm
-          - codename: trixie
-            container: debian:trixie
-          - codename: sid
-            container: debian:sid
           - arch: amd64
             platform: linux/amd64
           - arch: arm64
@@ -45,40 +36,27 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Get version from tag
-        id: version
-        run: |
-          # Extract version from tag (e.g., v1.0.0 -> 1.0.0)
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Version from tag: $VERSION"
-
-      - name: Install build dependencies
-        run: |
-          apt-get update
-          apt-get install -y \
-            build-essential \
-            debhelper \
-            nginx-dev \
-            devscripts \
-            fakeroot
-
-      - name: Update changelog version
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          # Update the version in debian/changelog
-          sed -i "1s/([^)]*)/($VERSION)/" debian/changelog
-          echo "Updated debian/changelog:"
-          head -1 debian/changelog
-
       - name: Build Debian package
         run: |
-          dpkg-buildpackage -us -uc -b
+          docker run --rm --platform ${{ matrix.platform }} \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            debian:${{ matrix.codename }} \
+            bash -c '
+              set -e
+              VERSION="${{ github.ref_name }}"
+              VERSION="${VERSION#v}"
 
-      - name: Move packages
-        run: |
-          mkdir -p packages
-          mv ../*.deb packages/
+              apt-get update
+              apt-get install -y build-essential debhelper nginx-dev devscripts fakeroot
+
+              sed -i "1s/([^)]*)/($VERSION)/" debian/changelog
+
+              dpkg-buildpackage -us -uc -b
+
+              mkdir -p packages
+              mv ../*.deb packages/
+            '
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -92,27 +70,34 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    container:
-      image: ${{ matrix.container }}
-      options: --platform=${{ matrix.platform }}
 
     strategy:
       matrix:
-        codename: [el8, el9, el10]
-        arch: [x86_64, aarch64, s390x]
         include:
           - codename: el8
             container: rockylinux:8
+            arch: x86_64
+            platform: linux/amd64
+          - codename: el8
+            container: rockylinux:8
+            arch: aarch64
+            platform: linux/arm64
           - codename: el9
             container: rockylinux:9
+            arch: x86_64
+            platform: linux/amd64
+          - codename: el9
+            container: rockylinux:9
+            arch: aarch64
+            platform: linux/arm64
           - codename: el10
             container: quay.io/rockylinux/rockylinux:10
-          - arch: x86_64
+            arch: x86_64
             platform: linux/amd64
-          - arch: aarch64
+          - codename: el10
+            container: quay.io/rockylinux/rockylinux:10
+            arch: aarch64
             platform: linux/arm64
-          - arch: s390x
-            platform: linux/s390x
 
     steps:
       - name: Set up QEMU
@@ -121,130 +106,84 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Get version from tag
-        id: version
-        run: |
-          # Extract version from tag (e.g., v1.0.0 -> 1.0.0)
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Version from tag: $VERSION"
-
-      - name: Install build dependencies
-        run: |
-          # Enable EPEL for nginx
-          dnf install -y epel-release dnf-plugins-core
-          dnf config-manager --set-enabled epel || true
-          # On EL8, enable powertools; on EL9+, enable crb
-          dnf config-manager --set-enabled powertools 2>/dev/null || \
-            dnf config-manager --set-enabled crb 2>/dev/null || true
-          # pcre-devel doesn't exist on EL10, only pcre2-devel
-          # Use --allowerasing to handle curl-minimal vs curl conflict
-          dnf install -y --allowerasing \
-            rpm-build \
-            gcc \
-            make \
-            pcre2-devel \
-            zlib-devel \
-            openssl-devel \
-            curl \
-            nginx
-          # Install pcre-devel only if available (EL8/EL9)
-          dnf install -y pcre-devel 2>/dev/null || true
-
-      - name: Get nginx version
-        id: nginx
-        run: |
-          NGINX_VERSION=$(nginx -v 2>&1 | sed 's/.*nginx\///')
-          echo "version=$NGINX_VERSION" >> $GITHUB_OUTPUT
-          echo "Nginx version: $NGINX_VERSION"
-
-      - name: Build nginx module
-        run: |
-          NGINX_VERSION="${{ steps.nginx.outputs.version }}"
-
-          # Download nginx source
-          curl -sL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o nginx.tar.gz
-          tar xzf nginx.tar.gz
-          cd nginx-${NGINX_VERSION}
-
-          # Configure with compat mode
-          ./configure --with-compat --add-dynamic-module=..
-
-          # Build module only
-          make modules
-
-          # Verify module was built
-          ls -la objs/*.so
-
-      - name: Create RPM structure
-        run: |
-          NGINX_VERSION="${{ steps.nginx.outputs.version }}"
-          VERSION=$(grep '^Version:' rpm/nginx-mod-http-host-normalize.spec | awk '{print $2}')
-
-          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-
-          # Copy built module
-          cp nginx-${NGINX_VERSION}/objs/ngx_http_host_normalize_module.so ~/rpmbuild/SOURCES/
-
-          # Copy spec file
-          cp rpm/nginx-mod-http-host-normalize.spec ~/rpmbuild/SPECS/
-
-          # Copy LICENSE and README
-          cp LICENSE ~/rpmbuild/SOURCES/ 2>/dev/null || echo "AGPL-3.0" > ~/rpmbuild/SOURCES/LICENSE
-          cp README.md ~/rpmbuild/SOURCES/ 2>/dev/null || echo "# ngx-http-host-normalize" > ~/rpmbuild/SOURCES/README.md
-
       - name: Build RPM package
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          DATE=$(date '+%a %b %d %Y')
+          docker run --rm --platform ${{ matrix.platform }} \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            ${{ matrix.container }} \
+            bash -c '
+              set -e
+              VERSION="${{ github.ref_name }}"
+              VERSION="${VERSION#v}"
 
-          # Use simplified spec for pre-built module
-          cat > ~/rpmbuild/SPECS/nginx-mod-http-host-normalize.spec << 'SPECEOF'
-          Name:           nginx-mod-http-host-normalize
-          Version:        __VERSION__
-          Release:        1%{?dist}
-          Summary:        Nginx module to normalize Host header for absolute URI requests
+              # Install dependencies
+              dnf install -y epel-release dnf-plugins-core || true
+              dnf config-manager --set-enabled epel || true
+              dnf config-manager --set-enabled powertools 2>/dev/null || dnf config-manager --set-enabled crb 2>/dev/null || true
+              dnf install -y --allowerasing rpm-build gcc make pcre2-devel zlib-devel openssl-devel curl nginx
+              dnf install -y pcre-devel 2>/dev/null || true
 
-          License:        AGPL-3.0-or-later
-          URL:            https://github.com/linagora/ngx-http-host-normalize
+              # Get nginx version
+              NGINX_VERSION=$(nginx -v 2>&1 | sed "s/.*nginx\///")
 
-          Requires:       nginx >= 1.20
+              # Download and build
+              curl -sL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o nginx.tar.gz
+              tar xzf nginx.tar.gz
+              cd nginx-${NGINX_VERSION}
+              ./configure --with-compat --add-dynamic-module=..
+              make modules
+              cd ..
 
-          %description
-          An Nginx module that normalizes the Host header when an absolute URI is used
-          in the HTTP request line, as specified in RFC 9112 Section 3.2.2.
+              # Create RPM
+              mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+              cp nginx-${NGINX_VERSION}/objs/ngx_http_host_normalize_module.so ~/rpmbuild/SOURCES/
 
-          %install
-          mkdir -p %{buildroot}%{_libdir}/nginx/modules
-          mkdir -p %{buildroot}%{_datadir}/nginx/modules
+              DATE=$(date "+%a %b %d %Y")
 
-          install -m 755 %{_sourcedir}/ngx_http_host_normalize_module.so \
-              %{buildroot}%{_libdir}/nginx/modules/
+              cat > ~/rpmbuild/SPECS/nginx-mod-http-host-normalize.spec << '\''SPECEOF'\''
+              Name:           nginx-mod-http-host-normalize
+              Version:        __VERSION__
+              Release:        1%{?dist}
+              Summary:        Nginx module to normalize Host header for absolute URI requests
 
-          cat > %{buildroot}%{_datadir}/nginx/modules/mod-http-host-normalize.conf << 'EOF'
-          load_module modules/ngx_http_host_normalize_module.so;
-          EOF
+              License:        AGPL-3.0-or-later
+              URL:            https://github.com/linagora/ngx-http-host-normalize
 
-          %files
-          %{_libdir}/nginx/modules/ngx_http_host_normalize_module.so
-          %{_datadir}/nginx/modules/mod-http-host-normalize.conf
+              Requires:       nginx >= 1.20
 
-          %changelog
-          * __DATE__ LINAGORA <info@linagora.com> - __VERSION__-1
-          - Release __VERSION__
-          SPECEOF
+              %description
+              An Nginx module that normalizes the Host header when an absolute URI is used
+              in the HTTP request line, as specified in RFC 9112 Section 3.2.2.
 
-          # Replace placeholders with actual values
-          sed -i "s/__VERSION__/${VERSION}/g" ~/rpmbuild/SPECS/nginx-mod-http-host-normalize.spec
-          sed -i "s/__DATE__/${DATE}/g" ~/rpmbuild/SPECS/nginx-mod-http-host-normalize.spec
+              %install
+              mkdir -p %{buildroot}%{_libdir}/nginx/modules
+              mkdir -p %{buildroot}%{_datadir}/nginx/modules
 
-          rpmbuild -bb ~/rpmbuild/SPECS/nginx-mod-http-host-normalize.spec
+              install -m 755 %{_sourcedir}/ngx_http_host_normalize_module.so \
+                  %{buildroot}%{_libdir}/nginx/modules/
 
-      - name: Move packages
-        run: |
-          mkdir -p packages
-          find ~/rpmbuild/RPMS -name "*.rpm" -exec mv {} packages/ \;
-          ls -la packages/
+              cat > %{buildroot}%{_datadir}/nginx/modules/mod-http-host-normalize.conf << '\''EOF'\''
+              load_module modules/ngx_http_host_normalize_module.so;
+              EOF
+
+              %files
+              %{_libdir}/nginx/modules/ngx_http_host_normalize_module.so
+              %{_datadir}/nginx/modules/mod-http-host-normalize.conf
+
+              %changelog
+              * __DATE__ LINAGORA <info@linagora.com> - __VERSION__-1
+              - Release __VERSION__
+              SPECEOF
+
+              sed -i "s/__VERSION__/${VERSION}/g" ~/rpmbuild/SPECS/nginx-mod-http-host-normalize.spec
+              sed -i "s/__DATE__/${DATE}/g" ~/rpmbuild/SPECS/nginx-mod-http-host-normalize.spec
+
+              rpmbuild -bb ~/rpmbuild/SPECS/nginx-mod-http-host-normalize.spec
+
+              mkdir -p packages
+              find ~/rpmbuild/RPMS -name "*.rpm" -exec cp {} packages/ \;
+            '
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -381,7 +320,7 @@ jobs:
         run: |
           # Create repository for each EL version and architecture
           for elver in el8 el9 el10; do
-            for arch in x86_64 aarch64 s390x; do
+            for arch in x86_64 aarch64; do
               echo "Processing ${elver} ${arch}..."
 
               # Create directory structure
@@ -472,7 +411,7 @@ jobs:
               <li><strong>Rocky Linux 9</strong> / RHEL 9 / AlmaLinux 9</li>
               <li><strong>Rocky Linux 10</strong> / RHEL 10 / AlmaLinux 10</li>
             </ul>
-            <p>Supported architectures: <strong>x86_64, aarch64, s390x</strong></p>
+            <p>Supported architectures: <strong>x86_64, aarch64</strong></p>
 
             <h3>1. Import the GPG key</h3>
             <pre>sudo rpm --import https://linagora.github.io/ngx-http-host-normalize/KEY.gpg</pre>
