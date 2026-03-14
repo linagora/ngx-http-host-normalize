@@ -10,26 +10,38 @@ permissions:
 
 jobs:
   build-deb:
-    name: Build .deb (${{ matrix.codename }})
+    name: Build .deb (${{ matrix.codename }} ${{ matrix.arch }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    container: ${{ matrix.container }}
+    container:
+      image: ${{ matrix.container }}
+      options: --platform=${{ matrix.platform }}
 
     strategy:
       matrix:
+        codename: [bookworm, trixie, sid]
+        arch: [amd64, arm64, armhf, s390x]
         include:
-          - distro: debian
-            codename: bookworm
+          - codename: bookworm
             container: debian:bookworm
-          - distro: debian
-            codename: trixie
+          - codename: trixie
             container: debian:trixie
-          - distro: debian
-            codename: sid
+          - codename: sid
             container: debian:sid
+          - arch: amd64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
+          - arch: armhf
+            platform: linux/arm/v7
+          - arch: s390x
+            platform: linux/s390x
 
     steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -71,31 +83,41 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: deb-${{ matrix.codename }}
+          name: deb-${{ matrix.codename }}-${{ matrix.arch }}
           path: packages/*.deb
           retention-days: 7
 
   build-rpm:
-    name: Build .rpm (${{ matrix.codename }})
+    name: Build .rpm (${{ matrix.codename }} ${{ matrix.arch }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    container: ${{ matrix.container }}
+    container:
+      image: ${{ matrix.container }}
+      options: --platform=${{ matrix.platform }}
 
     strategy:
       matrix:
+        codename: [el8, el9, el10]
+        arch: [x86_64, aarch64, s390x]
         include:
-          - distro: rocky
-            codename: el8
+          - codename: el8
             container: rockylinux:8
-          - distro: rocky
-            codename: el9
+          - codename: el9
             container: rockylinux:9
-          - distro: rocky
-            codename: el10
+          - codename: el10
             container: quay.io/rockylinux/rockylinux:10
+          - arch: x86_64
+            platform: linux/amd64
+          - arch: aarch64
+            platform: linux/arm64
+          - arch: s390x
+            platform: linux/s390x
 
     steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -227,7 +249,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rpm-${{ matrix.codename }}
+          name: rpm-${{ matrix.codename }}-${{ matrix.arch }}
           path: packages/*.rpm
           retention-days: 7
 
@@ -267,53 +289,82 @@ jobs:
           # Export public key
           gpg --armor --export "$GPG_KEY_ID" > repo/KEY.gpg
 
-          # Create repository for each distribution
+          # Create repository for each distribution and architecture
           for codename in bookworm trixie sid; do
             echo "Processing $codename..."
 
-            # Create directory structure
-            mkdir -p "repo/dists/${codename}/main/binary-amd64"
+            # Create directory structure for all architectures
+            for arch in amd64 arm64 armhf s390x; do
+              mkdir -p "repo/dists/${codename}/main/binary-${arch}"
 
-            # Copy .deb files
-            if [ -d "artifacts/deb-${codename}" ]; then
-              cp artifacts/deb-${codename}/*.deb "repo/dists/${codename}/main/binary-amd64/"
-            fi
+              # Copy .deb files
+              if [ -d "artifacts/deb-${codename}-${arch}" ]; then
+                cp artifacts/deb-${codename}-${arch}/*.deb "repo/dists/${codename}/main/binary-${arch}/" || true
+              fi
 
-            # Generate Packages file
-            cd repo
-            dpkg-scanpackages --arch amd64 "dists/${codename}/main/binary-amd64" > "dists/${codename}/main/binary-amd64/Packages"
-            gzip -k "dists/${codename}/main/binary-amd64/Packages"
-            cd ..
+              # Generate Packages file
+              cd repo
+              dpkg-scanpackages --arch "$arch" "dists/${codename}/main/binary-${arch}" > "dists/${codename}/main/binary-${arch}/Packages" || true
+              gzip -k "dists/${codename}/main/binary-${arch}/Packages"
+              cd ..
+            done
 
-            # Create Release file
+            # Create Release file with all architectures
             cd "repo/dists/${codename}"
 
-            PACKAGES_FILE="main/binary-amd64/Packages"
-            PACKAGES_GZ_FILE="main/binary-amd64/Packages.gz"
-
-            MD5_PACKAGES=$(md5sum "$PACKAGES_FILE" | cut -d' ' -f1)
-            MD5_PACKAGES_GZ=$(md5sum "$PACKAGES_GZ_FILE" | cut -d' ' -f1)
-            SHA256_PACKAGES=$(sha256sum "$PACKAGES_FILE" | cut -d' ' -f1)
-            SHA256_PACKAGES_GZ=$(sha256sum "$PACKAGES_GZ_FILE" | cut -d' ' -f1)
-            SIZE_PACKAGES=$(stat -c%s "$PACKAGES_FILE")
-            SIZE_PACKAGES_GZ=$(stat -c%s "$PACKAGES_GZ_FILE")
-
-            cat > Release << EOF
+            # Start building Release file content
+            cat > Release << 'EOF'
           Origin: ngx-http-host-normalize
           Label: ngx-http-host-normalize
           Suite: stable
           Codename: ${codename}
-          Architectures: amd64
+          Architectures: amd64 arm64 armhf s390x
           Components: main
           Description: Nginx Host Normalize Module APT Repository
           Date: $(date -Ru)
           MD5Sum:
-           ${MD5_PACKAGES} ${SIZE_PACKAGES} ${PACKAGES_FILE}
-           ${MD5_PACKAGES_GZ} ${SIZE_PACKAGES_GZ} ${PACKAGES_GZ_FILE}
-          SHA256:
-           ${SHA256_PACKAGES} ${SIZE_PACKAGES} ${PACKAGES_FILE}
-           ${SHA256_PACKAGES_GZ} ${SIZE_PACKAGES_GZ} ${PACKAGES_GZ_FILE}
           EOF
+
+            # Replace variables in header
+            sed -i "s/\${codename}/${codename}/g" Release
+            sed -i "s/\$(date -Ru)/$(date -Ru)/g" Release
+
+            # Add checksums for all architectures
+            for arch in amd64 arm64 armhf s390x; do
+              PACKAGES_FILE="main/binary-${arch}/Packages"
+              PACKAGES_GZ_FILE="main/binary-${arch}/Packages.gz"
+
+              if [ -f "$PACKAGES_FILE" ]; then
+                MD5_PACKAGES=$(md5sum "$PACKAGES_FILE" | cut -d' ' -f1)
+                SIZE_PACKAGES=$(stat -c%s "$PACKAGES_FILE")
+                echo " ${MD5_PACKAGES} ${SIZE_PACKAGES} ${PACKAGES_FILE}" >> Release
+              fi
+
+              if [ -f "$PACKAGES_GZ_FILE" ]; then
+                MD5_PACKAGES_GZ=$(md5sum "$PACKAGES_GZ_FILE" | cut -d' ' -f1)
+                SIZE_PACKAGES_GZ=$(stat -c%s "$PACKAGES_GZ_FILE")
+                echo " ${MD5_PACKAGES_GZ} ${SIZE_PACKAGES_GZ} ${PACKAGES_GZ_FILE}" >> Release
+              fi
+            done
+
+            # Add SHA256 section
+            echo "SHA256:" >> Release
+            for arch in amd64 arm64 armhf s390x; do
+              PACKAGES_FILE="main/binary-${arch}/Packages"
+              PACKAGES_GZ_FILE="main/binary-${arch}/Packages.gz"
+
+              if [ -f "$PACKAGES_FILE" ]; then
+                SHA256_PACKAGES=$(sha256sum "$PACKAGES_FILE" | cut -d' ' -f1)
+                SIZE_PACKAGES=$(stat -c%s "$PACKAGES_FILE")
+                echo " ${SHA256_PACKAGES} ${SIZE_PACKAGES} ${PACKAGES_FILE}" >> Release
+              fi
+
+              if [ -f "$PACKAGES_GZ_FILE" ]; then
+                SHA256_PACKAGES_GZ=$(sha256sum "$PACKAGES_GZ_FILE" | cut -d' ' -f1)
+                SIZE_PACKAGES_GZ=$(stat -c%s "$PACKAGES_GZ_FILE")
+                echo " ${SHA256_PACKAGES_GZ} ${SIZE_PACKAGES_GZ} ${PACKAGES_GZ_FILE}" >> Release
+              fi
+            done
 
             # Sign Release file
             echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
@@ -328,34 +379,38 @@ jobs:
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          # Create repository for each EL version
+          # Create repository for each EL version and architecture
           for elver in el8 el9 el10; do
-            echo "Processing $elver..."
+            for arch in x86_64 aarch64 s390x; do
+              echo "Processing ${elver} ${arch}..."
 
-            # Create directory structure
-            mkdir -p "repo/rpm/${elver}/x86_64"
+              # Create directory structure
+              mkdir -p "repo/rpm/${elver}/${arch}"
 
-            # Copy .rpm files
-            if [ -d "artifacts/rpm-${elver}" ]; then
-              cp artifacts/rpm-${elver}/*.rpm "repo/rpm/${elver}/x86_64/"
-            fi
+              # Copy .rpm files
+              if [ -d "artifacts/rpm-${elver}-${arch}" ]; then
+                cp artifacts/rpm-${elver}-${arch}/*.rpm "repo/rpm/${elver}/${arch}/" || true
+              fi
 
-            # Sign RPM packages
-            echo "%_gpg_name $GPG_KEY_ID" > ~/.rpmmacros
-            echo "%__gpg_sign_cmd %{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback --passphrase-fd 0 -u \"%{_gpg_name}\" -sbo %{__signature_filename} %{__plaintext_filename}" >> ~/.rpmmacros
+              # Sign RPM packages if any exist
+              echo "%_gpg_name $GPG_KEY_ID" > ~/.rpmmacros
+              echo "%__gpg_sign_cmd %{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback --passphrase-fd 0 -u \"%{_gpg_name}\" -sbo %{__signature_filename} %{__plaintext_filename}" >> ~/.rpmmacros
 
-            for rpm in repo/rpm/${elver}/x86_64/*.rpm; do
-              if [ -f "$rpm" ]; then
-                echo "$GPG_PASSPHRASE" | rpm --addsign "$rpm"
+              for rpm in repo/rpm/${elver}/${arch}/*.rpm; do
+                if [ -f "$rpm" ]; then
+                  echo "$GPG_PASSPHRASE" | rpm --addsign "$rpm"
+                fi
+              done
+
+              # Create repository metadata
+              createrepo_c "repo/rpm/${elver}/${arch}"
+
+              # Sign repository metadata
+              if [ -f "repo/rpm/${elver}/${arch}/repodata/repomd.xml" ]; then
+                echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+                  --detach-sign --armor "repo/rpm/${elver}/${arch}/repodata/repomd.xml"
               fi
             done
-
-            # Create repository metadata
-            createrepo_c "repo/rpm/${elver}/x86_64"
-
-            # Sign repository metadata
-            echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
-              --detach-sign --armor "repo/rpm/${elver}/x86_64/repodata/repomd.xml"
           done
 
       - name: Create index.html
@@ -386,6 +441,7 @@ jobs:
               <li><strong>Debian 13</strong> (trixie)</li>
               <li><strong>Debian unstable</strong> (sid)</li>
             </ul>
+            <p>Supported architectures: <strong>amd64, arm64, armhf, s390x</strong></p>
 
             <h3>1. Add the GPG key</h3>
             <pre>curl -fsSL https://linagora.github.io/ngx-http-host-normalize/KEY.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/ngx-http-host-normalize.gpg</pre>
@@ -416,6 +472,7 @@ jobs:
               <li><strong>Rocky Linux 9</strong> / RHEL 9 / AlmaLinux 9</li>
               <li><strong>Rocky Linux 10</strong> / RHEL 10 / AlmaLinux 10</li>
             </ul>
+            <p>Supported architectures: <strong>x86_64, aarch64, s390x</strong></p>
 
             <h3>1. Import the GPG key</h3>
             <pre>sudo rpm --import https://linagora.github.io/ngx-http-host-normalize/KEY.gpg</pre>
@@ -424,7 +481,7 @@ jobs:
             <pre>sudo tee /etc/yum.repos.d/ngx-http-host-normalize.repo &lt;&lt; 'EOF'
           [ngx-http-host-normalize]
           name=Nginx Host Normalize Module
-          baseurl=https://linagora.github.io/ngx-http-host-normalize/rpm/el$releasever/x86_64/
+          baseurl=https://linagora.github.io/ngx-http-host-normalize/rpm/el$releasever/$basearch/
           enabled=1
           gpgcheck=1
           gpgkey=https://linagora.github.io/ngx-http-host-normalize/KEY.gpg
